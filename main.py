@@ -8,7 +8,6 @@ from bs4 import BeautifulSoup
 DISCORD_WEBHOOK_URL = (
     "https://discord.com/api/webhooks/1554289880899788822/fNNeFxHka04snf4kxn0bvCTiNVI-aBiwHYiEVBF3rP7PU6X-3lI_UsroMjpjuiHa0mgN"
 )
-CHECK_INTERVAL_SECONDS = 1800  # 30分ごとに監視
 TOP_N = 10
 
 RANKING_URL = "https://news.yahoo.co.jp/ranking/comment/entertainment"
@@ -129,16 +128,14 @@ def fetch_ranking():
 
 
 def main():
-    print("🚀 Yahoo!ニュース TOP10監視（新着検知機能付き）を起動しました。")
+    print("🚀 Yahoo!ニュース TOP10チェックを実行します。")
 
-    while True:
-        items = fetch_ranking()
-        if items:
-            send_discord_ranking(items)
+    # 1回だけ取得して送信
+    items = fetch_ranking()
+    if items:
+        send_discord_ranking(items)
 
-        # 30分待機
-        time.sleep(CHECK_INTERVAL_SECONDS)
-
+    print("🏁 処理が完了しました。")
 
 if __name__ == "__main__":
     main()
