@@ -21,9 +21,9 @@ jobs:
         uses: actions/cache@v3
         with:
           path: previous_top10.json
-          key: yahoo-news-top10-cache-${{ github.run_id }}
+          key: yahoo-news-top10-cache-${{ runner.os }}-${{ github.run_id }}
           restore-keys: |
-            yahoo-news-top10-cache-
+            yahoo-news-top10-cache-${{ runner.os }}-
 
       - name: 必要なライブラリのインストール
         run: |
