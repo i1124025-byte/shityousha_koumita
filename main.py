@@ -6,7 +6,7 @@ from bs4 import BeautifulSoup
 # 設定エリア
 # ==========================================
 DISCORD_WEBHOOK_URL = (
-    "https://discord.com/api/webhooks/YOUR_CORRECT_WEBHOOK_URL1554289880899788822/fNNeFxHka04snf4kxn0bvCTiNVI-aBiwHYiEVBF3rP7PU6X-3lI_UsroMjpjuiHa0mgN"
+    "https://discord.com/api/webhooks/1554289880899788822/fNNeFxHka04snf4kxn0bvCTiNVI-aBiwHYiEVBF3rP7PU6X-3lI_UsroMjpjuiHa0mgN"
 )
 TOP_N = 10
 
