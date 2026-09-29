@@ -25,4 +25,4 @@ jobs:
 
       - name: スクリプトの実行
         run: |
-          python getYahooRankingEntertainment.py
+          python Main.py
