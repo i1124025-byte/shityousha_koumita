@@ -2,9 +2,8 @@ name: Check Yahoo News Ranking
 
 on:
   schedule:
-    # 30分ごとに自動実行 (UTC表記のため注意)
-    - cron: '*/30 * * * *'
-  workflow_dispatch: # 手動で即時実行するボタンも追加
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
 
 jobs:
   check-ranking:
@@ -26,4 +25,3 @@ jobs:
       - name: スクリプトの実行
         run: |
           python main.py
-          
