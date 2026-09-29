@@ -6,9 +6,7 @@ from bs4 import BeautifulSoup
 # ==========================================
 # 設定エリア
 # ==========================================
-DISCORD_WEBHOOK_URL = (
-    "https://discord.com/api/webhooks/1554289880899788822/fNNeFxHka04snf4kxn0bvCTiNVI-aBiwHYiEVBF3rP7PU6X-3lI_UsroMjpjuiHa0mgN"
-)
+DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
 CHECK_INTERVAL_SECONDS = 1800  # 30分ごとに監視
 TOP_N = 10
 
