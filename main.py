@@ -1,16 +1,19 @@
+import json
+import os
 import time
 import requests
 from bs4 import BeautifulSoup
-
 # ==========================================
 # 設定エリア
 # ==========================================
 DISCORD_WEBHOOK_URL = (
     "https://discord.com/api/webhooks/1554289880899788822/fNNeFxHka04snf4kxn0bvCTiNVI-aBiwHYiEVBF3rP7PU6X-3lI_UsroMjpjuiHa0mgN"
 )
+CHECK_INTERVAL_SECONDS = 1800  # 30分ごとに監視
 TOP_N = 10
 
 RANKING_URL = "https://news.yahoo.co.jp/ranking/comment/entertainment"
+CACHE_FILE = "previous_top10.json"
 
 # 前回取得したTOP10のURLリストを保持
 previous_top10_urls = []
@@ -66,8 +69,14 @@ def send_discord_ranking(ranking_items):
 
 
 def fetch_ranking():
-    """ランキング取得＆新着判定ロジック"""
-    global previous_top10_urls
+    # 前回URLをファイルから読み込む
+    previous_top10_urls = []
+    if os.path.exists(CACHE_FILE):
+        try:
+            with open(CACHE_FILE, "r", encoding="utf-8") as f:
+                previous_top10_urls = json.load(f)
+        except Exception as e:
+            print(f"キャッシュ読み込みエラー: {e}")
 
     headers = {
         "User-Agent": (
@@ -100,26 +109,26 @@ def fetch_ranking():
             seen_urls.add(url)
             current_urls.append(url)
 
-            # 初回実行時でなければ「前回TOP10に含まれていたか」を判定
+            # キャッシュが存在していれば新着判定
             is_new = False
             if previous_top10_urls:
                 is_new = url not in previous_top10_urls
 
             ranking_items.append(
-                {
-                    "rank": rank,
-                    "title": title,
-                    "url": url,
-                    "is_new": is_new,  # 新規ランクイン判定フラグ
-                }
+                {"rank": rank, "title": title, "url": url, "is_new": is_new}
             )
 
             rank += 1
             if rank > TOP_N:
                 break
 
-        # 次回判定用に今回のURLリストを保持
-        previous_top10_urls = current_urls
+        # 今回のURLリストをファイルに保存
+        try:
+            with open(CACHE_FILE, "w", encoding="utf-8") as f:
+                json.dump(current_urls, f, ensure_ascii=False)
+        except Exception as e:
+            print(f"キャッシュ保存エラー: {e}")
+
         return ranking_items
 
     except Exception as e:
