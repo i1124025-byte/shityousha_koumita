@@ -26,6 +26,11 @@ jobs:
           pip install -r requirements-comments.txt
           playwright install --with-deps chromium
 
+      - name: 調査用ダンプ（一時）
+        env:
+          ARTICLE_URL: ${{ inputs.article_url }}
+        run: python debug_probe.py "$ARTICLE_URL"
+
       - name: コメントをCSV出力
         env:
           ARTICLE_URL: ${{ inputs.article_url }}
