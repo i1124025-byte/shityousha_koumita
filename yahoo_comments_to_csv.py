@@ -16,7 +16,7 @@ Yahoo!ニュース記事のコメントをCSV出力するスクリプト
     python yahoo_comments_to_csv.py <記事URL> --headful
 
 Yahoo!ニュースのクラス名は自動生成で頻繁に変わるため、要素の特定は
-クラス名ではなく <article> 要素と「返信」「共感した」などの文言で行っている。
+クラス名ではなくボタンの data-cl-params 属性（計測用パラメータ）で行っている。
 ページ構造が変わって取得できなくなった場合は JS_* 定数を調整すること。
 """
 
@@ -62,132 +62,106 @@ CSV_COLUMNS = [
 # ==========================================
 # ページ内で実行するJavaScript
 # ==========================================
+# Yahoo!ニュースのコメント欄は、ボタンの data-cl-params 属性に
+#   _cl_vmodule:cmt_usr（コメント）/ rep（返信）
+#   _cl_link:agbtn1（共感した）/ agbtn2（なるほど）/ disbtn1（うーん）
+#   _cl_link:opnre（返信を開く）/ cmtload + more（返信のもっと見る）
+#   cmt_id:<コメントID>
+# が入っているので、これを手がかりにコメントを特定する。
+# （末尾に cl が付く agbtn1cl などは押下後表示用の非表示ボタンなので使わない）
 
-# 1つの <article> からコメント情報を抜き出す関数（他のJSから共通利用）
-JS_EXTRACT_FN = r"""
-(art) => {
+# vmodule（cmt_usr / rep）のコメントを、scope 要素内から順番に抜き出す
+JS_EXTRACT_COMMENTS = r"""
+([vmodule, scopeId]) => {
     const clean = (s) => (s || "").replace(/\s+/g, " ").trim();
     const num = (s) => {
         const m = clean(s).replace(/,/g, "").match(/(\d+)/);
         return m ? parseInt(m[1], 10) : 0;
     };
+    const scope = scopeId
+        ? document.querySelector(`[data-ycc-scope="${scopeId}"]`)
+        : document;
+    if (!scope) return [];
+    const sel = (link) => `button[data-cl-params*="_cl_vmodule:${vmodule};_cl_link:${link};"]`;
 
-    // ユーザー名: 見出し or ユーザーページへのリンク
-    let user = "";
-    const h = art.querySelector("h2, h3, a[href*='/users/']");
-    if (h) user = clean(h.textContent);
-
-    // 投稿日時: <time> があれば優先、なければ「○分前」「10/8(水) 12:34」などの文字列
-    let postedAt = "";
-    const t = art.querySelector("time");
-    if (t) {
-        postedAt = clean(t.getAttribute("datetime") || t.textContent);
-    } else {
-        const m = clean(art.textContent).match(
-            /(\d+(秒|分|時間|日)前|\d{1,2}\/\d{1,2}\([^)]\)\s*\d{1,2}:\d{2}|\d{4}\/\d{1,2}\/\d{1,2}[^ ]*)/
-        );
-        if (m) postedAt = m[1];
-    }
-
-    // 本文: ネストした返信(<article>)を除いた中で最も長い <p>
-    let text = "";
-    for (const p of art.querySelectorAll("p")) {
-        if (p.closest("article") !== art) continue;
-        const s = (p.innerText || p.textContent || "").trim();
-        if (s.length > text.length) text = s;
-    }
-
-    // リアクション数・返信件数（ボタン/リンクの文言から判定）
-    let empathy = 0, naruhodo = 0, uun = 0, replyCount = 0;
-    for (const b of art.querySelectorAll("button, a, [role='button']")) {
-        if (b.closest("article") !== art) continue;
-        const label = clean(b.textContent) + " " + clean(b.getAttribute("aria-label"));
-        if (label.includes("共感")) empathy = num(label);
-        else if (label.includes("なるほど")) naruhodo = num(label);
-        else if (label.includes("うーん")) uun = num(label);
-        else if (/返信/.test(label) && /\d/.test(label)) replyCount = num(label);
-    }
-
-    return { user, posted_at: postedAt, text, empathy, naruhodo, uun, reply_count: replyCount };
-}
-"""
-
-# ページ読み込み直後に表示されているトップレベルのコメントに印をつけて返す
-JS_MARK_TOP_COMMENTS = r"""
-() => {
-    const extract = %s;
-    const arts = [...document.querySelectorAll("article")].filter(
-        (a) => !a.parentElement.closest("article") && !a.dataset.yccId
-    );
-    let seq = 0;
     const out = [];
-    for (const a of arts) {
-        const info = extract(a);
-        if (!info.text) continue;  // 本文のないarticle（広告など）は除外
-        a.dataset.yccId = "c" + (seq++);
-        a.dataset.yccSeen = "1";
-        info.id = a.dataset.yccId;
-        out.push(info);
+    const seen = new Set();
+    for (const anchor of scope.querySelectorAll(sel("agbtn1"))) {
+        const m = (anchor.getAttribute("data-cl-params") || "").match(/cmt_id:([^;]+)/);
+        if (!m || seen.has(m[1])) continue;
+        const id = m[1];
+        seen.add(id);
+        const art = anchor.closest("article");
+        if (!art) continue;
+        const own = (e) => e.closest("article") === art;
+        const btn = (link) => [...art.querySelectorAll(sel(link))].find(own);
+
+        const h = [...art.querySelectorAll("h2, a[data-cl-params*='_cl_link:profnm;']")].find(own);
+        const t = [...art.querySelectorAll("time")].find(own);
+        let text = "";
+        for (const p of art.querySelectorAll("p")) {
+            if (!own(p)) continue;
+            const s = (p.innerText || p.textContent || "").trim();
+            if (s.length > text.length) text = s;
+        }
+        const reply = [...art.querySelectorAll(sel("opnre"))].find(own);
+
+        out.push({
+            id,
+            user: h ? clean(h.textContent) : "",
+            posted_at: t ? clean(t.textContent) : "",
+            text,
+            empathy: btn("agbtn1") ? num(btn("agbtn1").textContent) : 0,
+            naruhodo: btn("agbtn2") ? num(btn("agbtn2").textContent) : 0,
+            uun: btn("disbtn1") ? num(btn("disbtn1").textContent) : 0,
+            reply_count: reply ? num(reply.textContent) : 0,
+        });
     }
     return out;
 }
-""" % JS_EXTRACT_FN
+"""
 
-# 指定コメントの返信ボタンを押す。押せたら true
-JS_CLICK_REPLY_TOGGLE = r"""
-(id) => {
-    const art = document.querySelector(`article[data-ycc-id="${id}"]`);
-    if (!art) return false;
-    const btns = [...art.querySelectorAll("button, a, [role='button']")].filter(
-        (b) => b.closest("article") === art
+# コメントを囲む <li> に目印をつけ、返信を開くボタンを押す。押せたら true
+JS_OPEN_REPLIES = r"""
+(cmtId) => {
+    const btn = document.querySelector(
+        `button[data-cl-params*="_cl_link:opnre;"][data-cl-params*="cmt_id:${cmtId};"]`
     );
-    // 「返信 12」「返信12件」のような件数付きのものを優先（返信投稿ボタンを避ける）
-    const btn =
-        btns.find((b) => /返信/.test(b.textContent) && /\d/.test(b.textContent)) ||
-        btns.find((b) => /返信を(表示|見る)/.test(b.textContent));
     if (!btn) return false;
-    if (btn.getAttribute("aria-expanded") === "true") return true;
+    const scope = btn.closest("li") || btn.closest("article").parentElement;
+    scope.dataset.yccScope = cmtId;
     btn.click();
     return true;
 }
 """
 
-# 指定コメント付近の「もっと見る」系ボタンを1つ押す。押せたら true
+# 返信の「もっと見る」ボタンを押す。押せたら true
 JS_CLICK_MORE_REPLIES = r"""
-(id) => {
-    const art = document.querySelector(`article[data-ycc-id="${id}"]`);
-    if (!art) return false;
-    const scope = art.closest("li") || art.parentElement;
-    const btn = [...scope.querySelectorAll("button, a, [role='button']")].find((b) => {
-        const s = (b.textContent || "").replace(/\s+/g, "");
-        return /(もっと見る|さらに表示|返信をもっと|続きの返信|もっと読む)/.test(s)
-            && !b.closest("nav");
-    });
+(cmtId) => {
+    const scope = document.querySelector(`[data-ycc-scope="${cmtId}"]`);
+    if (!scope) return false;
+    const btn = scope.querySelector(
+        'button[data-cl-params*="_cl_vmodule:cmtload;"][data-cl-params*="_cl_link:more;"]'
+    );
     if (!btn) return false;
     btn.click();
     return true;
 }
 """
 
-# まだ印のついていない <article> 数（返信の読み込み検知用）
-JS_COUNT_UNSEEN = r"""
-() => [...document.querySelectorAll("article")].filter((a) => !a.dataset.yccSeen).length
-"""
-
-# 新たに出現した <article>（＝直前に展開したコメントの返信）を回収して印をつける
-JS_COLLECT_NEW_REPLIES = r"""
-() => {
-    const extract = %s;
-    const out = [];
-    for (const a of document.querySelectorAll("article")) {
-        if (a.dataset.yccSeen) continue;
-        a.dataset.yccSeen = "1";
-        const info = extract(a);
-        if (info.text) out.push(info);
+# 目印をつけた範囲内に表示されている返信の数
+JS_COUNT_REPLIES = r"""
+(cmtId) => {
+    const scope = document.querySelector(`[data-ycc-scope="${cmtId}"]`);
+    if (!scope) return 0;
+    const ids = new Set();
+    for (const b of scope.querySelectorAll('button[data-cl-params*="_cl_vmodule:rep;_cl_link:agbtn1;"]')) {
+        const m = (b.getAttribute("data-cl-params") || "").match(/cmt_id:([^;]+)/);
+        if (m) ids.add(m[1]);
     }
-    return out;
+    return ids.size;
 }
-""" % JS_EXTRACT_FN
+"""
 
 
 # ==========================================
@@ -201,33 +175,34 @@ def normalize_article_url(url):
     return m.group(0)
 
 
-def wait_for_new_articles(page, before_count):
-    """返信が読み込まれて <article> が増えるのを待つ（増えなければタイムアウトで抜ける）"""
+def wait_for_more_replies(page, comment_id, before_count):
+    """返信が読み込まれて件数が増えるのを待つ（増えなければタイムアウトで抜ける）"""
     try:
         page.wait_for_function(
-            f"() => ({JS_COUNT_UNSEEN})() > {before_count}", timeout=CLICK_WAIT_MS
+            f"(id) => ({JS_COUNT_REPLIES})(id) > {before_count}",
+            arg=comment_id,
+            timeout=CLICK_WAIT_MS,
         )
     except PlaywrightTimeoutError:
         pass
     page.wait_for_timeout(300)
+    return page.evaluate(JS_COUNT_REPLIES, comment_id)
 
 
 def fetch_replies(page, comment_id):
     """コメントの返信をすべて展開して取得する"""
-    replies = []
-    if not page.evaluate(JS_CLICK_REPLY_TOGGLE, comment_id):
-        return replies
-    wait_for_new_articles(page, 0)
-    replies.extend(page.evaluate(JS_COLLECT_NEW_REPLIES))
+    if not page.evaluate(JS_OPEN_REPLIES, comment_id):
+        return []
+    count = wait_for_more_replies(page, comment_id, 0)
 
-    # 「もっと見る」が出なくなるまで押し続ける
+    # 「もっと見る」が出なくなる（または件数が増えなくなる）まで押し続ける
     while page.evaluate(JS_CLICK_MORE_REPLIES, comment_id):
-        wait_for_new_articles(page, 0)
-        new = page.evaluate(JS_COLLECT_NEW_REPLIES)
-        if not new:
+        new_count = wait_for_more_replies(page, comment_id, count)
+        if new_count <= count:
             break
-        replies.extend(new)
-    return replies
+        count = new_count
+
+    return page.evaluate(JS_EXTRACT_COMMENTS, ["rep", comment_id])
 
 
 def scrape_sort(page, article_url, order, with_replies):
@@ -241,12 +216,15 @@ def scrape_sort(page, article_url, order, with_replies):
         print(f"[{sort_label}] {page_no}ページ目を取得中: {url}")
         page.goto(url, wait_until="domcontentloaded", timeout=30000)
         try:
-            page.wait_for_selector("article", timeout=10000)
+            page.wait_for_selector(
+                'button[data-cl-params*="_cl_vmodule:cmt_usr;_cl_link:agbtn1;"]',
+                timeout=15000,
+            )
         except PlaywrightTimeoutError:
             print(f"[{sort_label}] コメントが見つからないため終了します。")
             break
 
-        comments = page.evaluate(JS_MARK_TOP_COMMENTS)
+        comments = page.evaluate(JS_EXTRACT_COMMENTS, ["cmt_usr", None])
         if not comments:
             break
 
