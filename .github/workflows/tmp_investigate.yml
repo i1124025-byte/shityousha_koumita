@@ -6,22 +6,8 @@ jobs:
   inv:
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
       - run: |
-          UA="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
-          for u in https://news.yahoo.co.jp/ranking/access/news https://news.yahoo.co.jp/ranking/comment; do
-            echo "=================== $u"
-            curl -sSL -A "$UA" -o p.html "$u"; wc -c p.html
-            grep -o '__PRELOADED_STATE__\|__NEXT_DATA__' p.html | sort | uniq -c
-            echo "--- li/a around first article"
-            python3 - <<'PY'
-          import re
-          h=open('p.html',encoding='utf-8').read()
-          i=h.find('/articles/')
-          print(h[max(0,i-1500):i+3000])
-          print("....... count /articles/:", h.count('/articles/'), " pickup:", h.count('/pickup/'))
-          j=h.find('__PRELOADED_STATE__')
-          if j>=0: print("STATE:", h[j:j+4000])
-          for k in ['時間','コメント数','件/']:
-            for m in list(re.finditer(k,h))[:5]: print("CTX",k,":",h[max(0,m.start()-300):m.start()+200].replace('\n',' '))
-          PY
-          done
+          php -v | head -1
+          php yahoo_comment_ranking.php out.csv; echo "exit=$?"
+          wc -l out.csv; cat out.csv
