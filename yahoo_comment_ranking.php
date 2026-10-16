@@ -8,8 +8,9 @@
  *   php yahoo_comment_ranking.php                 # data/yahoo_comment_ranking_YYYYMMDD.csv に出力
  *   php yahoo_comment_ranking.php /path/to/out.csv # 出力先を指定
  *
- * Cron（ConoHa WING ジョブスケジューラー）例: 毎朝7時
+ * Cron（ConoHa WING「サーバー管理 > ジョブスケジューラー」）例: 毎朝7時
  *   /usr/bin/php /home/<ユーザー名>/scripts/yahoo_comment_ranking.php
+ *   （ログを残す場合）... yahoo_comment_ranking.php >> /home/<ユーザー名>/scripts/data/cron.log 2>&1
  *
  * Yahoo!ニュースのクラス名は自動生成で頻繁に変わるため、要素の特定はクラス名ではなく
  * data-cl-params 属性（_cl_vmodule:ranking / _cl_position:N）とタグ構造で行っている。
@@ -21,9 +22,9 @@ date_default_timezone_set('Asia/Tokyo');
 // 設定エリア
 // ==========================================
 const RANKING_URL = 'https://news.yahoo.co.jp/ranking/comment';
+// ※ 2026年10月時点、ヤフコメランキング（総合）はサイト上で40位までしか公開されていない
+//   （?page=2 等のページ送りも無い）ため、実際の出力は最大40件になる。
 const TOP_N = 50;
-const MAX_PAGES = 3;            // TOP_N に足りない場合に ?page=N を辿る上限
-const PAGE_WAIT_SECONDS = 1;    // ページ取得間の待機（アクセス負荷軽減）
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
     . '(KHTML, like Gecko) Chrome/124.0 Safari/537.36';
 const OUTPUT_DIR = __DIR__ . '/data';
@@ -122,27 +123,10 @@ function parseRanking(string $html): array
 
 function collectRanking(): array
 {
-    $byRank = [];
-    for ($page = 1; $page <= MAX_PAGES && count($byRank) < TOP_N; $page++) {
-        $url = $page === 1 ? RANKING_URL : RANKING_URL . '?page=' . $page;
-        logMessage("取得中: {$url}");
-        $items = parseRanking(fetchHtml($url));
-        $added = 0;
-        foreach ($items as $item) {
-            if ($item['rank'] <= TOP_N && !isset($byRank[$item['rank']])) {
-                $byRank[$item['rank']] = $item;
-                $added++;
-            }
-        }
-        if ($added === 0) {
-            break; // 次ページが存在しない（同じ内容が返る）場合
-        }
-        if (count($byRank) < TOP_N) {
-            sleep(PAGE_WAIT_SECONDS);
-        }
-    }
-    ksort($byRank);
-    return array_values($byRank);
+    logMessage('取得中: ' . RANKING_URL);
+    $items = array_filter(parseRanking(fetchHtml(RANKING_URL)), fn($item) => $item['rank'] <= TOP_N);
+    usort($items, fn($a, $b) => $a['rank'] <=> $b['rank']);
+    return $items;
 }
 
 function writeCsv(string $path, array $rows): void
@@ -187,9 +171,6 @@ function main(array $argv): int
 
         writeCsv($output, $rows);
         logMessage(count($rows) . "件を {$output} に出力しました。");
-        if (count($rows) < TOP_N) {
-            logMessage('警告: TOP' . TOP_N . 'に満たない件数でした。');
-        }
         return 0;
     } catch (Throwable $e) {
         logMessage('エラー: ' . $e->getMessage());
