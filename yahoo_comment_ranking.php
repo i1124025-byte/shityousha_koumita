@@ -1,16 +1,18 @@
 <?php
 /**
- * Yahoo!ニュース ヤフコメランキング（総合）TOP50 を CSV に出力するスクリプト
+ * Yahoo!ニュース ヤフコメランキングを CSV に出力するスクリプト
+ *   - 総合: TOP10
+ *   - 各カテゴリー（国内・国際・経済・エンタメ・スポーツ・IT・科学・ライフ・地域）: TOP5
  *
- * 出力項目: collected_at,rank,title,url,comments_per_hour,published_at
+ * 出力項目: collected_at,category,rank,title,url,comments_per_hour,published_at
  *
  * 使い方:
  *   php yahoo_comment_ranking.php                 # data/yahoo_comment_ranking_YYYYMMDD.csv に出力
  *   php yahoo_comment_ranking.php /path/to/out.csv # 出力先を指定
  *
  * Cron（ConoHa WING「サーバー管理 > ジョブスケジューラー」）例: 毎朝7時
- *   /usr/bin/php /home/<ユーザー名>/scripts/yahoo_comment_ranking.php
- *   （ログを残す場合）... yahoo_comment_ranking.php >> /home/<ユーザー名>/scripts/data/cron.log 2>&1
+ *   /usr/bin/php /home/<ユーザー名>/yahoo_ranking/yahoo_comment_ranking.php
+ *   （ログを残す場合）... yahoo_comment_ranking.php >> /home/<ユーザー名>/yahoo_ranking/cron.log 2>&1
  *
  * Yahoo!ニュースのクラス名は自動生成で頻繁に変わるため、要素の特定はクラス名ではなく
  * data-cl-params 属性（_cl_vmodule:ranking / _cl_position:N）とタグ構造で行っている。
@@ -22,14 +24,24 @@ date_default_timezone_set('Asia/Tokyo');
 // 設定エリア
 // ==========================================
 const RANKING_URL = 'https://news.yahoo.co.jp/ranking/comment';
-// ※ 2026年10月時点、ヤフコメランキング（総合）はサイト上で40位までしか公開されていない
-//   （?page=2 等のページ送りも無い）ため、実際の出力は最大40件になる。
-const TOP_N = 50;
+// 取得するランキング: [カテゴリー名, URLの末尾, 取得件数]
+const CATEGORIES = [
+    ['総合', '', 10],
+    ['国内', 'domestic', 5],
+    ['国際', 'world', 5],
+    ['経済', 'business', 5],
+    ['エンタメ', 'entertainment', 5],
+    ['スポーツ', 'sports', 5],
+    ['IT・科学', 'it-science', 5],
+    ['ライフ', 'life', 5],
+    ['地域', 'local', 5],
+];
+const PAGE_WAIT_SECONDS = 1;    // ページ取得間の待機（アクセス負荷軽減）
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
     . '(KHTML, like Gecko) Chrome/124.0 Safari/537.36';
 const OUTPUT_DIR = __DIR__ . '/data';
 
-const CSV_COLUMNS = ['collected_at', 'rank', 'title', 'url', 'comments_per_hour', 'published_at'];
+const CSV_COLUMNS = ['collected_at', 'category', 'rank', 'title', 'url', 'comments_per_hour', 'published_at'];
 
 // ==========================================
 // 処理本体
@@ -121,10 +133,10 @@ function parseRanking(string $html): array
     return $items;
 }
 
-function collectRanking(): array
+function collectRanking(string $url, int $limit): array
 {
-    logMessage('取得中: ' . RANKING_URL);
-    $items = array_filter(parseRanking(fetchHtml(RANKING_URL)), fn($item) => $item['rank'] <= TOP_N);
+    logMessage("取得中: {$url}");
+    $items = array_filter(parseRanking(fetchHtml($url)), fn($item) => $item['rank'] <= $limit);
     usort($items, fn($a, $b) => $a['rank'] <=> $b['rank']);
     return $items;
 }
@@ -153,29 +165,54 @@ function main(array $argv): int
     $now = new DateTimeImmutable();
     $output = $argv[1] ?? OUTPUT_DIR . '/yahoo_comment_ranking_' . $now->format('Ymd') . '.csv';
 
-    try {
-        $items = collectRanking();
-        if (!$items) {
-            throw new RuntimeException('ランキングが1件も取得できませんでした（ページ構造が変わった可能性があります）');
+    $collectedAt = $now->format('Y-m-d H:i:s');
+    $rows = [];
+    $failed = [];
+
+    // 1カテゴリーで失敗しても、他のカテゴリーは出力する
+    foreach (CATEGORIES as $i => [$category, $slug, $limit]) {
+        if ($i > 0) {
+            sleep(PAGE_WAIT_SECONDS);
         }
+        try {
+            $items = collectRanking($slug === '' ? RANKING_URL : RANKING_URL . '/' . $slug, $limit);
+            if (!$items) {
+                throw new RuntimeException('ランキングが1件も取得できませんでした（ページ構造が変わった可能性があります）');
+            }
+        } catch (Throwable $e) {
+            logMessage("エラー（{$category}）: " . $e->getMessage());
+            $failed[] = $category;
+            continue;
+        }
+        foreach ($items as $item) {
+            $rows[] = [
+                'collected_at' => $collectedAt,
+                'category' => $category,
+                'rank' => $item['rank'],
+                'title' => $item['title'],
+                'url' => $item['url'],
+                'comments_per_hour' => $item['comments_per_hour'],
+                'published_at' => normalizePublishedAt($item['published_text'], $now),
+            ];
+        }
+    }
 
-        $collectedAt = $now->format('Y-m-d H:i:s');
-        $rows = array_map(fn($item) => [
-            'collected_at' => $collectedAt,
-            'rank' => $item['rank'],
-            'title' => $item['title'],
-            'url' => $item['url'],
-            'comments_per_hour' => $item['comments_per_hour'],
-            'published_at' => normalizePublishedAt($item['published_text'], $now),
-        ], $items);
-
+    if (!$rows) {
+        logMessage('エラー: すべてのカテゴリーで取得に失敗したため、CSVは出力しません。');
+        return 1;
+    }
+    try {
         writeCsv($output, $rows);
-        logMessage(count($rows) . "件を {$output} に出力しました。");
-        return 0;
     } catch (Throwable $e) {
         logMessage('エラー: ' . $e->getMessage());
         return 1;
     }
+    logMessage(count($rows) . "件を {$output} に出力しました。");
+    if ($failed) {
+        logMessage('取得に失敗したカテゴリー: ' . implode('、', $failed));
+        return 1;
+    }
+    return 0;
 }
 
 exit(main($argv));
