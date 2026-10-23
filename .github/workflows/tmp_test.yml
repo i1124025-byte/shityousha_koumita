@@ -1,0 +1,15 @@
+name: TMP test php
+on:
+  push:
+    branches: [claude/hopeful-wozniak-zdj4g2]
+jobs:
+  t:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          start=$(date +%s)
+          php yahoo_comment_ranking.php out.csv 2>&1 | grep -v 'コメント取得中'; echo "exit=${PIPESTATUS[0]}"
+          echo "elapsed=$(( $(date +%s) - start ))s"
+          wc -l out.csv
+          php -r '$f=fopen("out_comments.csv","r");$h=fgetcsv($f,0,",","\"","");echo implode(",",$h),"\n";$n=0;$per=[];while($r=fgetcsv($f,0,",","\"","")){$n++;$per[$r[1]]=($per[$r[1]]??0)+1;if($n<=3)echo json_encode($r,JSON_UNESCAPED_UNICODE),"\n";}echo "rows=$n articles=",count($per)," min=",min($per)," max=",max($per),"\n";'
