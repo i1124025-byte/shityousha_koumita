@@ -1,0 +1,30 @@
+name: TMP probe comment pages
+on:
+  push:
+    branches: [claude/hopeful-wozniak-zdj4g2]
+jobs:
+  p:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          UA="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+          A=$(curl -sSL -A "$UA" https://news.yahoo.co.jp/ranking/comment | grep -o 'https://news.yahoo.co.jp/articles/[0-9a-f]*' | head -1)
+          echo "ARTICLE=$A"
+          for n in 1 2 3; do
+            curl -sSL -A "$UA" -o c$n.html -w "page=$n HTTP %{http_code} time=%{time_total}s\n" "$A/comments?page=$n&order=recommended"
+            python3 - "$n" <<'PY'
+          import re,json,sys
+          n=sys.argv[1]
+          h=open(f'c{n}.html',encoding='utf-8').read()
+          m=re.search(r'__PRELOADED_STATE__\s*=\s*(\{.*?\})\s*</script>',h,re.S)
+          s=json.loads(m.group(1))
+          cf=s.get('commentFull',{})
+          lst=cf.get('userCommentList',[])
+          print(' keys:',[k for k in cf.keys()])
+          print(' count:',len(lst))
+          for c in lst[:2]: print('  ',c.get('commentId'),c.get('empathyCount'),c.get('text','')[:40].replace('\n',' '))
+          for k,v in cf.items():
+            if not isinstance(v,(list,dict)): print(' ',k,'=',v)
+          PY
+            sleep 1
+          done
