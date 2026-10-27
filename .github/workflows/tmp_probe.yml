@@ -1,0 +1,41 @@
+name: TMP probe polls
+on:
+  push:
+    branches: [claude/hopeful-wozniak-zdj4g2]
+jobs:
+  p:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.10'}
+      - run: |
+          pip install -q -r requirements-comments.txt && playwright install --with-deps chromium > /dev/null
+          UA="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+          curl -sSL -A "$UA" -o p.html https://news.yahoo.co.jp/polls/74560
+          echo "links:"; grep -o 'href="[^"]*polls/74560[^"]*"' p.html | sort -u | head -20
+          python3 - <<'PY'
+          import re,json
+          h=open('p.html',encoding='utf-8').read()
+          m=re.search(r'__PRELOADED_STATE__\s*=\s*(\{.*?\})\s*</script>',h,re.S)
+          if m:
+              s=json.loads(m.group(1)); print('KEYS',list(s.keys()))
+              for k in ['articleType','commentArticle','pageData']:
+                  if k in s: print(k, json.dumps(s[k],ensure_ascii=False)[:800])
+          print('vmodules', sorted(set(re.findall(r'_cl_vmodule:([a-z_0-9]+);',h))))
+          PY
+          cat > probe.py <<'PY'
+          from playwright.sync_api import sync_playwright
+          import re
+          UA="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+          with sync_playwright() as p:
+              b=p.chromium.launch(); pg=b.new_context(user_agent=UA,locale="ja-JP").new_page()
+              for url in ["https://news.yahoo.co.jp/polls/74560","https://news.yahoo.co.jp/polls/74560/comments","https://news.yahoo.co.jp/polls/74560/comments?page=2&order=recommended"]:
+                  r=pg.goto(url,wait_until="domcontentloaded",timeout=30000); pg.wait_for_timeout(4000)
+                  print("====",url,"->",pg.url,r.status if r else None)
+                  print(pg.evaluate("""()=>{const c={};for(const b of document.querySelectorAll('[data-cl-params]')){const m=(b.getAttribute('data-cl-params')).match(/_cl_vmodule:([^;]+);_cl_link:([^;]+);/);if(m){const k=m[1]+':'+m[2];c[k]=(c[k]||0)+1}}return c}"""))
+                  print("articles:",pg.evaluate("document.querySelectorAll('article').length"))
+                  print([a for a in pg.evaluate("[...document.querySelectorAll('a')].map(a=>a.href).filter(h=>h.includes('74560'))")][:15])
+              b.close()
+          PY
+          python probe.py
