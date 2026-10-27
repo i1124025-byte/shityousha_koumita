@@ -8,21 +8,18 @@ jobs:
     steps:
       - run: |
           UA="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
-          curl -sSL -A "$UA" https://news.yahoo.co.jp/ranking/comment | grep -o 'https://news.yahoo.co.jp/articles/[0-9a-f]*' | awk '!s[$0]++' | sed -n '1p;20p;40p' > arts.txt
-          for A in $(cat arts.txt); do
-            echo "=========== $A"
-            for path in "/comments?page=1&order=recommended" ""; do
-              curl -sSL -A "$UA" -o c.html "$A$path"
-              python3 - "$path" <<'PY'
-          import re,json,sys
-          h=open('c.html',encoding='utf-8').read()
-          m=re.search(r'__PRELOADED_STATE__\s*=\s*(\{.*?\})\s*</script>',h,re.S)
-          s=json.loads(m.group(1))
-          print('--- path', repr(sys.argv[1]))
-          for k in s:
-              if re.search('summar|ai|digest',k,re.I): print(k, json.dumps(s[k],ensure_ascii=False)[:1500])
-          i=h.find('AI')
-          for mm in list(re.finditer('要約',h))[:2]: print('CTX', re.sub(r'<[^>]+>',' ',h[mm.start()-200:mm.start()+600]).replace('\n',' '))
-          PY
-            done
+          A=$(curl -sSL -A "$UA" https://news.yahoo.co.jp/ranking/comment | grep -o 'https://news.yahoo.co.jp/articles/[0-9a-f]*' | head -1)
+          curl -sSL -A "$UA" -o c.html "$A/comments"
+          mkdir js; grep -o '<script[^>]*src="[^"]*"' c.html | grep -o 'src="[^"]*"' | cut -d'"' -f2 > srcs.txt
+          wc -l srcs.txt
+          i=0; for s in $(cat srcs.txt); do i=$((i+1)); case "$s" in http*) u="$s";; //*) u="https:$s";; *) u="https://news.yahoo.co.jp$s";; esac; curl -sSL -A "$UA" -o js/$i.js "$u"; done
+          echo "--- files mentioning summary"
+          grep -l -i 'commentSummary\|summaryOfMajorityOpinion' js/*.js
+          for f in $(grep -l 'summaryOfMajorityOpinion\|commentSummaryToken' js/*.js); do
+            echo "=== $f"
+            grep -o '.\{300\}commentSummaryToken.\{300\}' $f | head -5
+            grep -o '.\{250\}[sS]ummary[A-Za-z]*\(Url\|URL\|Api\|API\|Path\|Endpoint\).\{250\}' $f | head -5
+            grep -o '"[^"]*/summar[^"]*"' $f | sort -u | head -20
+            grep -o "'[^']*/summar[^']*'" $f | sort -u | head -20
+            grep -o '`[^`]*summar[^`]*`' $f | sort -u | head -20
           done
