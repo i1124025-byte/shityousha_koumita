@@ -14,7 +14,7 @@ jobs:
         timeout-minutes: 6
         run: |
           pip install -q -r requirements-comments.txt
-          playwright install --with-deps chromium 2>&1 | tail -3
+          which google-chrome; google-chrome --version
       - name: probe
         timeout-minutes: 4
         run: |
@@ -36,7 +36,7 @@ jobs:
           import re
           UA="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
           with sync_playwright() as p:
-              b=p.chromium.launch(); pg=b.new_context(user_agent=UA,locale="ja-JP").new_page()
+              b=p.chromium.launch(channel="chrome"); pg=b.new_context(user_agent=UA,locale="ja-JP").new_page()
               for url in ["https://news.yahoo.co.jp/polls/74560","https://news.yahoo.co.jp/polls/74560/comments","https://news.yahoo.co.jp/polls/74560/comments?page=2&order=recommended"]:
                   r=pg.goto(url,wait_until="domcontentloaded",timeout=30000); pg.wait_for_timeout(4000)
                   print("====",url,"->",pg.url,r.status if r else None)
