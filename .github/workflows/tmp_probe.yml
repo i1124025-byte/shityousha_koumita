@@ -5,14 +5,21 @@ on:
 jobs:
   p:
     runs-on: ubuntu-latest
+    timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: {python-version: '3.10'}
-      - run: |
-          pip install -q -r requirements-comments.txt && playwright install --with-deps chromium > /dev/null
+      - name: install
+        timeout-minutes: 6
+        run: |
+          pip install -q -r requirements-comments.txt
+          playwright install --with-deps chromium 2>&1 | tail -3
+      - name: probe
+        timeout-minutes: 4
+        run: |
           UA="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
-          curl -sSL -A "$UA" -o p.html https://news.yahoo.co.jp/polls/74560
+          curl -sSL --max-time 20 -A "$UA" -o p.html https://news.yahoo.co.jp/polls/74560
           echo "links:"; grep -o 'href="[^"]*polls/74560[^"]*"' p.html | sort -u | head -20
           python3 - <<'PY'
           import re,json
