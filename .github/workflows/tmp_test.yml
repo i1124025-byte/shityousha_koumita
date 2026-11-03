@@ -1,0 +1,26 @@
+name: TMP test notify
+on:
+  push:
+    branches: [claude/hopeful-wozniak-zdj4g2]
+jobs:
+  t:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          echo "== 設定ファイルなしで通常実行（エラーになるはず）"
+          php yahoo_comment_ranking_notify.php; echo "exit=$?"
+          echo "== ダミー設定で初回実行（記録だけ）"
+          printf "<?php return ['discord_webhook_url' => 'https://discord.com/api/webhooks/0/dummy'];\n" > notify_config.php
+          php yahoo_comment_ranking_notify.php; echo "exit=$?"
+          python3 -c "import json;s=json.load(open('data/notify_state.json'));print('saved',len(s['urls']),s['checked_at'])"
+          echo "== 変化なしのはず（dry-run）"
+          php yahoo_comment_ranking_notify.php --dry-run; echo "exit=$?"
+          echo "== 記録から3件（3位・20位・40位）を消して、新着扱いになるか（dry-run）"
+          python3 -c "import json;s=json.load(open('data/notify_state.json'));u=s['urls'];[u.pop(i) for i in (39,19,2)];json.dump(s,open('data/notify_state.json','w'))"
+          php yahoo_comment_ranking_notify.php --dry-run; echo "exit=$?"
+          echo "== dry-run では記録が更新されていないこと"
+          python3 -c "import json;print('urls in state',len(json.load(open('data/notify_state.json'))['urls']))"
+          echo "== 本体スクリプトも単体で動くこと"
+          php yahoo_comment_ranking.php out.csv 2>&1 | head -3

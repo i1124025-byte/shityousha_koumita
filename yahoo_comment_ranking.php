@@ -312,4 +312,7 @@ function main(array $argv): int
     return ($failed || $failedArticles) ? 1 : 0;
 }
 
-exit(main($argv));
+// 直接実行されたときだけ動かす（yahoo_comment_ranking_notify.php から関数を読み込めるようにするため）
+if (PHP_SAPI === 'cli' && realpath($_SERVER['SCRIPT_FILENAME']) === __FILE__) {
+    exit(main($argv));
+}
