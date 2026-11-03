@@ -8,7 +8,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - run: |
+      - shell: bash {0}
+        run: |
           echo "== 設定ファイルなしで通常実行（エラーになるはず）"
           php yahoo_comment_ranking_notify.php; echo "exit=$?"
           echo "== ダミー設定で初回実行（記録だけ）"
